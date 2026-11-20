@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>404 – This page isn’t here</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f7f7;--fg:#535353;--muted:#9a9a9a;--ink:#202124;--sub:#5f6368;--accent:#1a73e8;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#202124;--fg:#acacac;--muted:#787c80;--ink:#e8eaed;--sub:#9aa0a6;--accent:#8ab4f8;}
+}
+:root[data-theme="dark"]{--bg:#202124;--fg:#acacac;--muted:#787c80;--ink:#e8eaed;--sub:#9aa0a6;--accent:#8ab4f8;}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:680px;margin:0 auto;padding:56px 20px 48px}
+h1{font-size:40px;font-weight:400;margin:0 0 8px}
+.lead{margin:0 0 36px;color:var(--sub);font-size:18px;line-height:1.5;max-width:46ch}
+canvas{display:block;width:100%;aspect-ratio:600/150;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
+canvas:focus-visible{outline:2px dashed var(--accent);outline-offset:6px}
+.cap{margin:18px 0 28px;color:var(--sub);font-size:19px;min-height:2.8em;line-height:1.4}
+a{color:var(--accent);font-size:17px}
+</style>
+</head>
+<body>
+<main>
+  <h1>404</h1>
+  <p class="lead">There’s nothing at this address. While you’re here, outrun a few cacti. They don’t play fair.</p>
+  <canvas id="game" tabindex="0" role="img" aria-label="Chrome-style dinosaur game in which the cacti sometimes jump, lunge, back away, blink or pop out of the ground. Press space or tap to jump."></canvas>
+  <p class="cap" id="cap" role="status">Press space to play</p>
+  <a href="/">Back to home</a>
+</main>
+
+<script>
+(()=>{
+const cv=document.getElementById("game"),ctx=cv.getContext("2d"),cap=document.getElementById("cap");
+const W=600,H=150,GY=124,DX=28,U=2,G=.6;
+let C={},scale=1;
+function colors(){const s=getComputedStyle(document.documentElement);["bg","fg","muted","accent"].forEach(n=>C[n]=s.getPropertyValue("--"+n).trim())}
+function resize(){const r=cv.getBoundingClientRect(),d=Math.min(window.devicePixelRatio||1,2);cv.width=Math.round(r.width*d);cv.height=Math.round(r.width*H/W*d);scale=cv.width/W}
+colors();resize();
+addEventListener("resize",resize);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",colors);
+new MutationObserver(colors).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+if(document.fonts)document.fonts.load("10px 'Press Start 2P'");
+
+/* pixel sprites: each # is one 2px cell */
+const DINO=[
+"..........########..",".........##########.",".........##.#######.",".........##########.",".........##########.",
+".........#####......",".........########...","#.......######......","##.....#######.##...","###...#########.#...",
+"####.###########....","#############.......",".############.......","..###########.......","...##########.......",
+"....#########.......",".....########.......","......######........"];
+const TOP=[".....###.....",".....###.....",".....###.....",".##..###.....",".##..###.....",".##..###..##.",".##..###..##.",".##..###..##.",
+".#######..##.",".#######..##.",".....#######.",".....#######."];
+const crows=big=>TOP.concat(Array(big?14:8).fill(".....###...."+"."));
+const CLOUD=["......####........",".....#....#..###..","..###......##...#.",".#..............#.","#...............##",".################."];
+function bmp(rows,x,y,col){
+  ctx.fillStyle=col;x=Math.round(x);y=Math.round(y);
+  rows.forEach((r,j)=>{let i=0;while(i<r.length){if(r[i]==="#"){const s=i;while(r[i]==="#")i++;ctx.fillRect(x+s*U,y+j*U,(i-s)*U,U)}else i++}});
+}
+function dino(x,y,fr,dead){
+  bmp(DINO,x,y,C.fg);
+  const b=Math.round(y)+18*U;ctx.fillStyle=C.fg;
+  const leg=(c,len)=>{ctx.fillRect(x+c*U,b,2*U,len*U);if(len===4)ctx.fillRect(x+(c+2)*U,b+3*U,U,U)};
+  leg(6,fr===1?2:4);leg(10,fr===0?2:4);
+  if(dead)ctx.clearRect(x+11*U,Math.round(y)+2*U,2*U,2*U);
+}
+const mod=(a,n)=>((a%n)+n)%n;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+
+/* state */
+let state="idle",last=0,dist=0,score=0,hi=0,speed=6,yd=0,vyd=0,run=0,obs=[],gapLeft=350,deadAt=0,cause="";
+try{hi=+localStorage.getItem("dino404-hi")||0}catch(e){}
+const pebbles=Array.from({length:34},()=>({x:Math.random()*W,w:1+Math.floor(Math.random()*3),y:GY+4+Math.random()*10}));
+const clouds=[{x:80,y:28},{x:300,y:48},{x:520,y:22}];
+const pad=n=>String(Math.floor(n)).padStart(5,"0");
+const CAUSES={hop:"That cactus hopped.",dash:"That cactus lunged.",retreat:"That cactus backed off, then came back.",blink:"That cactus blinked closer.",popup:"It popped out of the ground.",none:"A plain old cactus."};
+function say(t){if(cap.textContent!==t)cap.textContent=t}
+function reset(){obs=[];dist=0;score=0;speed=6;yd=0;vyd=0;gapLeft=350;state="play";say("Space or ↑ to jump. Watch for the cacti that cheat.")}
+function press(){
+  if(state==="idle"||(state==="over"&&performance.now()-deadAt>450))reset();
+  if(state==="play"&&yd===0)vyd=10.2;
+}
+function release(){if(state==="play"&&vyd>4)vyd=4}
+
+function spawn(){
+  if(score>110&&Math.random()<.2){
+    obs.push({kind:"mound",x:W-40,popX:DX+190+Math.random()*90,w:20});
+    gapLeft=speed*34+120+Math.random()*150;return;
+  }
+  const r=Math.random(),n=r<.55?1:r<.85?2:3,big=Math.random()<.35;
+  const o={kind:"cactus",x:W+6,n,big,h:crows(big).length*U,w:(n-1)*30+26,y:0,vy:0,grow:1,wt:0,wl:14,wind:0,dash:0,back:0,done:false,twist:null,trig:0};
+  if(score>30&&Math.random()<Math.min(.65,.2+score/900)){
+    o.twist=pick(["hop","hop","dash","retreat","blink"]);
+    o.trig=250+Math.random()*150;
+    if(o.twist==="blink"){o.wl=26;o.trig=330+Math.random()*100}
+  }
+  obs.push(o);gapLeft=o.w+speed*34+90+Math.random()*220;
+}
+function fire(o){
+  if(o.twist==="hop"){o.vy=9.3;o.y=.01}
+  else if(o.twist==="dash")o.dash=24;
+  else if(o.twist==="retreat")o.back=20;
+  else if(o.twist==="blink")o.x=Math.max(DX+110,o.x-(90+Math.random()*70));
+}
+function hit(){
+  const top=GY-yd-44,d={x:DX+8,y:top+4,w:28,h:40};
+  for(const o of obs){
+    if(o.kind!=="cactus")continue;
+    const hh=o.h*o.grow,b={x:o.x+4,y:GY-o.y-hh+2,w:o.w-8,h:hh-2};
+    if(d.x<b.x+b.w&&d.x+d.w>b.x&&d.y<b.y+b.h&&d.y+d.h>b.y){cause=CAUSES[o.twist&&o.done?o.twist:o.twist==="popup"?"popup":"none"];return true}
+  }
+  return false;
+}
+function update(dt){
+  speed=Math.min(13,speed+.002*dt);dist+=speed*dt;score=dist*.025;run+=dt/6;
+  vyd-=G*dt;yd+=vyd*dt;if(yd<=0){yd=0;vyd=0}
+  gapLeft-=speed*dt;if(gapLeft<=0)spawn();
+  obs.forEach(o=>{
+    if(o.kind==="mound"){
+      o.x-=speed*dt;
+      if(o.x<=o.popX){Object.assign(o,{kind:"cactus",n:1,big:Math.random()<.4,y:0,vy:0,grow:0,wt:0,wind:0,dash:0,back:0,done:true,twist:"popup"});o.h=crows(o.big).length*U;o.w=26}
+      return;
+    }
+    let vx=-speed;
+    if(o.twist&&o.twist!=="popup"&&!o.done&&!o.wind&&o.x-DX<o.trig){o.wind=1;o.wt=0}
+    if(o.wind){o.wt+=dt;if(o.wt>=o.wl){o.wind=0;o.done=true;fire(o)}}
+    if(o.dash>0){vx-=speed*1.05;o.dash-=dt}
+    if(o.back>0){vx=speed*.9;o.back-=dt}
+    o.x+=vx*dt;
+    if(o.y>0||o.vy>0){o.vy-=G*dt;o.y+=o.vy*dt;if(o.y<=0){o.y=0;o.vy=0}}
+    if(o.grow<1)o.grow=Math.min(1,o.grow+.16*dt);
+  });
+  obs=obs.filter(o=>o.x>-120);
+  if(hit()){
+    state="over";deadAt=performance.now();
+    if(score>hi){hi=score;try{localStorage.setItem("dino404-hi",String(Math.floor(hi)))}catch(e){}}
+    say("Game over. "+cause+" Press space to play again.");
+  }
+}
+
+function drawCactus(o){
+  const rows=crows(o.big),hpx=o.h,flick=o.wind&&o.twist==="blink"&&Math.floor(o.wt/3)%2;
+  if(flick)return;
+  const shake=o.wind&&o.twist!=="blink"?(Math.floor(o.wt/2)%2?2:-2):0;
+  const yTop=GY-o.y-hpx;
+  ctx.save();
+  if(o.grow<1){ctx.beginPath();ctx.rect(o.x-4,GY-hpx-4,o.w+8,hpx+4);ctx.clip()}
+  for(let i=0;i<o.n;i++)bmp(rows,o.x+i*30+shake,yTop+(1-o.grow)*hpx,C.fg);
+  ctx.restore();
+  if(o.wind&&o.twist!=="blink"){
+    const cx=Math.round(o.x+o.w/2);ctx.fillStyle=C.accent;
+    ctx.fillRect(cx-2,yTop-20,4,10);ctx.fillRect(cx-2,yTop-7,4,4);
+  }
+}
+function drawMound(o){
+  const j=Math.floor(performance.now()/90)%2,x=Math.round(o.x);ctx.fillStyle=C.fg;
+  ctx.fillRect(x,GY-2,20,2);ctx.fillRect(x+4,GY-4-j,12,2);ctx.fillRect(x+8,GY-6,4,2);
+  ctx.fillStyle=C.muted;ctx.fillRect(x-4,GY-6-j*2,2,2);ctx.fillRect(x+22,GY-8+j*2,2,2);
+}
+function spaced(t,cx,y,sp){
+  let w=0;for(const ch of t)w+=ctx.measureText(ch).width+sp;w-=sp;
+  let x=cx-w/2;for(const ch of t){ctx.fillText(ch,x,y);x+=ctx.measureText(ch).width+sp}
+}
+function draw(){
+  ctx.setTransform(scale,0,0,scale,0,0);ctx.clearRect(0,0,W,H);
+  clouds.forEach(c=>bmp(CLOUD,mod(c.x-dist*.2,W+80)-40,c.y,C.muted));
+  ctx.fillStyle=C.fg;ctx.fillRect(0,GY,W,1);
+  ctx.fillStyle=C.muted;
+  pebbles.forEach(p=>ctx.fillRect(Math.round(mod(p.x-dist,W+10)),Math.round(p.y),p.w*2,1));
+  obs.forEach(o=>o.kind==="mound"?drawMound(o):drawCactus(o));
+  dino(DX,GY-yd-44,yd>0?2:Math.floor(run)%2,state==="over");
+  ctx.font="10px 'Press Start 2P',monospace";ctx.textBaseline="alphabetic";ctx.textAlign="right";
+  ctx.fillStyle=C.fg;ctx.fillText(pad(score),W-6,18);
+  if(hi>0){ctx.fillStyle=C.muted;ctx.fillText("HI "+pad(hi),W-6-ctx.measureText(pad(score)).width-16,18)}
+  if(state==="over"){
+    ctx.textAlign="left";ctx.fillStyle=C.fg;ctx.font="12px 'Press Start 2P',monospace";
+    spaced("GAME OVER",W/2,52,6);
+    const cx=W/2,cy=82;
+    ctx.fillRect(cx-18,cy-16,36,32);
+    ctx.strokeStyle=C.bg;ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,8,-1.2,4.4);ctx.stroke();
+    ctx.fillStyle=C.bg;ctx.beginPath();ctx.moveTo(cx+2,cy-15);ctx.lineTo(cx+2,cy-3);ctx.lineTo(cx+12,cy-9);ctx.closePath();ctx.fill();
+  }
+}
+function frame(now){
+  const dt=Math.min((now-last)/16.667,2.5)||1;last=now;
+  if(state==="play")update(dt);
+  draw();requestAnimationFrame(frame);
+}
+const KEYS=["Space","ArrowUp"];
+addEventListener("keydown",e=>{
+  if(!KEYS.includes(e.code))return;
+  if(e.target.closest&&e.target.closest("a,button"))return;
+  e.preventDefault();if(!e.repeat)press();
+});
+addEventListener("keyup",e=>{if(KEYS.includes(e.code))release()});
+cv.addEventListener("pointerdown",e=>{e.preventDefault();press()});
+["pointerup","pointercancel"].forEach(n=>cv.addEventListener(n,release));
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
